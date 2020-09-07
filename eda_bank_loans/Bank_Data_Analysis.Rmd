@@ -1,0 +1,763 @@
+---
+title: "Bank_Data_Analyisis"
+author: "Sherry Rodas"
+date: "12/31/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+```{r packages, echo=FALSE}
+library(caret)
+library(stats)
+library(MASS)
+library(nnet)
+library(glmnet)
+library(dplyr)
+library(doParallel)
+library(e1071)
+library(kernlab)
+library(VennDiagram)
+registerDoParallel(10)
+library(gridExtra)
+library(ggplot2)
+library(ggpubr)
+theme_set(theme_pubr())
+library(caret)
+library(glmnet)
+library(gmodels)
+library(car)
+library(RcmdrMisc)
+library(dummies)
+library(corrplot)
+library(rcompanion)
+library(C50)
+```
+
+# Hypothesis
+Term Deposit
+Can we predict if a client secure a term deposit based on:
+1. Client education, job, age, and previous financial behavior?
+2. If they've been contacted in other campaigns?
+3. Social and Economic context attributes?
+
+```{r pressure, echo=FALSE}
+setwd('/Users/sherryrodas/Documents/Kaggle')
+bank = read.csv('bank-marketing/bank-additional-full.csv',sep=";")
+```
+```{r pressure, echo=FALSE}
+print(dim(bank))
+print(head(bank))
+print(summary(bank))
+bank$month <- factor(bank$month, levels(bank$month)[c(6,1,7,5,4,2,10,9,8,3)])
+bank$yn <- ifelse(bank$y == 'yes', 1, 0)
+bank$pdays <- ifelse(bank$pdays == 999, 0, 1)
+print(str(bank, vec.len=1, width = 60, strict.width = "cut"))
+```
+
+# A) Exploratory Data Analysis - Bank Client Data
+
+## 1) Categorical Variables
+
+### 1.1) Y
+
+```{r EDA}
+#Y
+count(bank,bank$y)
+print(table(bank$y))
+print(prop.table(table(bank$y))*100)
+```
+There is clear class imbalance in the response variable, may need to use smote.
+
+
+### 1.2) Education
+
+```{r EDA}
+# Education
+#print(levels(bank$education))
+print('Variable: Education')
+bank$education = as.character(bank$education)
+bank$education[bank$education == 'professional.course'] = 'prof.course'
+bank$education[bank$education == 'university.degree'] = 'university'
+bank$education = as.factor(bank$education)
+CrossTable(bank$education,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$education, bank$y)
+# print(round(prop.table(table(bank$education)),3)*100)
+# print(round(prop.table(table(bank$y,bank$education),1),3)*100) #1 for row, 2 for column
+edu <- ggplot(bank, aes(education,color=bank$y)) + geom_bar(position = "identity",fill="white") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+plot_data = bank %>% group_by(y,education) %>% summarise(ct = n())
+edu_stack = ggplot(plot_data, aes(x=education, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(edu)
+print(edu_stack)
+```
+The p-value associated to the Chi-squared test equals to 2.2e-16, which is higher than our 0.01-threshold. So, for a confidence level of 99%, there is an association between the dependent variable y and education. We're keeping the variable.
+
+
+### 1.3) Job
+
+```{r EDA}
+# Job
+#print(levels(bank$job))
+print('----------------------------------------------------------')
+print('Variable: Job')
+CrossTable(bank$job,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$job, bank$y)
+# print(round(prop.table(table(bank$job)),3)*100)
+# print(round(prop.table(table(bank$y,bank$job),1),3)*100) #1 for row, 2 for column
+job <- ggplot(bank, aes(job, color=bank$y)) + geom_bar(position = "identity",fill="white") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+plot_data = bank %>% group_by(y,job) %>% summarise(ct = n())
+job_stack = ggplot(plot_data, aes(x=job, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(job)
+print(job_stack)
+```
+Keeping variable.
+
+
+### 1.4) Marital Status
+```{r EDA}
+# Marital Status
+#print(levels(bank$marital))
+print('----------------------------------------------------------')
+print('Variable: Marital Status')
+CrossTable(bank$marital,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$marital, bank$y)
+# print(round(prop.table(table(bank$marital)),3)*100)
+# print(round(prop.table(table(bank$y,bank$marital),1),3)*100) #1 for row, 2 for column
+marital <- ggplot(bank, aes(marital, color=bank$y)) + geom_bar(position = "identity",fill="white") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+plot_data = bank %>% group_by(y,marital) %>% summarise(ct = n())
+marital_stack = ggplot(plot_data, aes(x=marital, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(marital)
+print(marital_stack)
+```
+Most customers had a university education, were in administrative and blue-collared jobs, and most were married.
+Keeping variable.
+
+
+### 1.5) Default
+
+```{r EDA}
+# Default
+CrossTable(bank$default,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$default, bank$y)
+def <- ggplot(bank,aes(default,color=bank$y)) + geom_bar(position = "identity", fill="white") + theme_pubclean() + theme(legend.position = "none")
+plot_data = bank %>% group_by(y,default) %>% summarise(ct = n())
+def_stack = ggplot(plot_data, aes(x=default, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(def)
+print(def_stack)
+```
+There seems to be an association between the y variable and those that have defaulted loans. But that could be due to a sever class imbalance where only 3 of those targeted in the marketing campaign had defaulted a loan, and 20% of those is unknown.
+We will remove this variable.
+
+### 1.6) Housing
+
+```{r EDA}
+# Housing
+CrossTable(bank$housing,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$housing, bank$y)
+house <- ggplot(bank,aes(housing,color=bank$y)) + geom_bar(position = "identity", fill="white") + theme_pubclean() + theme(legend.position = "none")
+plot_data = bank %>% group_by(y,housing) %>% summarise(ct = n())
+housing_stack = ggplot(plot_data, aes(x=housing, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(house)
+print(housing_stack)
+```
+The p-value is higher than our 0.01 threshold, so we fail to reject the null, which means there is no association between the dependent variable and housing variable. We are discarding housing.
+
+
+### 1.7) Loan
+```{r EDA}
+# Loan
+CrossTable(bank$loan,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+chisq.test(bank$loan, bank$y)
+loan <- ggplot(bank,aes(loan,color=bank$y)) + geom_bar(position = "identity", fill="white") + theme_pubclean() + theme(legend.position = "none")
+plot_data = bank %>% group_by(y,loan) %>% summarise(ct = n())
+loan_stack = ggplot(plot_data, aes(x=loan, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(loan)
+print(loan_stack)
+
+```
+
+Most customers did not have defaulted loans, regardless of whether they had loans or not. Most did not have personal loans, but many had housing loans.
+The p-value is higher than our 0.01 threshold, so we fail to reject the null, which means there is no association between the dependent variable and housing variable. We are discarding housing.
+
+
+
+### 1.8) Month
+
+```{r}
+# Month
+print(levels(bank$month))
+CrossTable(bank$month,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+mth = ggplot(bank, aes(x=month,color=bank$y)) + geom_bar(position = "identity", fill="white") + theme_pubclean() + labs(color="Secured Loans")
+
+plot_data = bank %>% group_by(y,month) %>% summarise(ct = n())
+month_stack = ggplot(plot_data, aes(x=month, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+print(mth)
+print(month_stack)
+```
+
+
+## 2) Numerical Values
+
+### 2.1) Age
+
+```{r EDA}
+# Age
+print(paste0("Mean: ",round(mean(bank$age),2)))
+print(paste0("Variance: ",round(var(bank$age),2))) #measures how spread out a dataset is (not in same uom)
+print(paste0("Std Deviation: ",round(sd(bank$age),2))) #measures how spread out the numbers are from their mean (in uom)
+print(paste0("Coefficient of Variation: ",round(sd(bank$age)/mean(bank$age),2)*100,"%")) #coefficient of variation is the sd relative to the mean. Does not have uom, universal across datasets, perfect for comparisons. CV < %15 = low dispersion, CV > 30% = high dispersion
+
+p <- ggplot(bank, aes(x=bank$y, y=age, color=bank$y)) + geom_boxplot(outlier.colour = "black") + xlab("Secured Loan") + ylab("Age") + labs(color="Secured Loan")
+p2 <- ggplot(bank, aes(x=age,color=bank$y)) + geom_histogram(binwidth = 5, fill="white", position = "identity") + xlab("Secured Loan") + ylab("Age") + labs(color="Secured Loan")
+print(p)
+print(p2)
+
+plot_data = bank %>% group_by(y,age) %>% summarise(ct = n())
+p3 = ggplot(plot_data, aes(x=age, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+print(p3)
+
+# Calculate Outliers
+# IQR = Q3 - Q1
+# lower 1.5 * IQR whisker = Q1 - 1.5 * IQR
+# upper 1.5 * IQR whisker = Q3 + 1.5 * IQR
+print("Quantiles:")
+print(quantile(bank$age))
+iqr = quantile(bank$age,probs = 0.75) - quantile(bank$age,probs = 0.25)
+upper = quantile(bank$age,probs = 0.75) + 1.5 * iqr
+lower = quantile(bank$age,probs = 0.25) - 1.5 * iqr
+print(paste("Ages above ",upper," are outliers"))
+
+```
+Observations:
+Age: Most poeple that were targeted wered aged between 20 and 50 yrs old. Ages above 69 are outliers, and should look into excluding those for analysis. The coefficient of variation is of %26 which means the age dispersion is not too high. Those that secured a loan have a distribution that is more spread out than those that did not, but both have close medians at about 40 years of age, and they both have large numbered outliers from 90-100 years old. Interestingly enough though, a higher proportion of the early twenty year olds and those aged 60 and above actually ended up responding to the campaign and booking a loan.
+
+
+### 2.2) Campaign - Contacts performed during this campaign
+
+```{r EDA}
+# Campaign Contacts
+bank$campaign = as.numeric(bank$campaign)
+print(paste0("Mean: ",round(mean(bank$campaign),2)))
+print(paste0("Variance: ",round(var(bank$campaign),2)))
+print(paste0("Std Deviation: ",round(sd(bank$campaign),2)))
+print(paste0("Coefficient of Variation: ",round(sd(bank$campaign)/mean(bank$campaign),2)*100,"%"))
+print("Table Proportions")
+print(round(prop.table(table(bank$campaign)),3)*100)
+print(table(bank$campaign))
+print(summary(bank$campaign))
+
+p = ggplot(bank, aes(x=campaign,color=bank$y)) + geom_histogram(binwidth = 2, position = "identity", fill="white") + labs(color="Secured Loan")
+print(p)
+
+
+plot_data = bank %>% group_by(y,campaign) %>% summarise(ct = n())
+campaign_stack = ggplot(plot_data, aes(x=campaign, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+print(campaign_stack)
+
+print("Quantiles:")
+print(quantile(bank$campaign))
+iqr = quantile(bank$campaign,probs = 0.75) - quantile(bank$campaign,probs = 0.25)
+upper = quantile(bank$campaign,probs = 0.75) + 1.5 * iqr
+lower = quantile(bank$campaign,probs = 0.25) - 1.5 * iqr
+print(paste("Campaign contacts above ",upper," are outliers"))
+
+
+hist(bank$campaign)
+```
+Data points for campaign contacts are highly dispered. More than 40% of customers were contacted once for this campaign and ~25% were contacted twice. 81.5% were contacted at least 3 times for this specific campaign. Customers who were contacted more than 6 times are outliers, will need to exclude those. On average, people that were contacted more were more likely to book the loan.
+
+
+### 2.3) Previous - Contacts performed before this campaign
+
+```{r EDA}
+# Previous
+print(paste0("Mean: ",round(mean(bank$previous),2)))
+print(paste0("Variance: ",round(var(bank$previous),2)))
+print(paste0("Std Deviation: ",round(sd(bank$previous),2)))
+print(paste0("Coefficient of Variation: ",round(sd(bank$previous)/mean(bank$previous),2)*100,"%"))
+print("Table Proportions")
+print(round(prop.table(table(bank$previous)),3)*100)
+print(table(bank$previous))
+
+p = ggplot(bank, aes(x=previous,color=bank$y)) + geom_bar(position = "identity", fill="white") + labs(color="Secured Loan")
+
+print(p)
+
+plot_data = bank %>% group_by(y,previous) %>% summarise(ct = n())
+previous_stack = ggplot(plot_data, aes(x=previous, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+print(previous_stack)
+
+print("Quantiles:")
+print(quantile(bank$previous))
+iqr = quantile(bank$previous,probs = 0.75) - quantile(bank$previous,probs = 0.25)
+upper = quantile(bank$previous,probs = 0.75) + 1.5 * iqr
+lower = quantile(bank$previous,probs = 0.25) - 1.5 * iqr
+print(paste("Previous ampaign contacts above ",upper," are outliers"))
+
+
+hist(bank$previous)
+```
+More than 86% of customers have not been contacted prior to this campaign.
+
+
+### 2.4) Poutcome - Outcome of previous campaign
+
+```{r EDA}
+# Previous Outcome
+CrossTable(bank$poutcome,bank$y, prop.r = T, prop.c = F, prop.t = F, prop.chisq = F)
+pout = ggplot(bank, aes(x=poutcome,color=bank$y)) + geom_bar(position = "identity", fill="white") + theme_pubclean() + labs(color="Secured Loans")
+
+plot_data = bank %>% group_by(y,poutcome) %>% summarise(ct = n())
+poutcome_stack = ggplot(plot_data, aes(x=poutcome, y=ct, fill=y)) + geom_bar(position="fill", stat="identity") + theme_pubclean() + theme(axis.text.x = element_text(angle=45)) + labs(color="Secured Loan")
+
+```
+
+
+### 2.5) Employment variation rate
+### 2.6) Consumer price index
+### 2.7) Consumer confidence index
+### 2.8) Euribor 3 month rate
+
+```{r EDA}
+#Employment Variation Rate
+evr <- ggplot(bank, aes(x=bank$y,y=emp.var.rate,color=bank$y)) + geom_boxplot(outlier.colour = "black");evr
+evr_hist <- ggplot(bank, aes(x=emp.var.rate,color=bank$y)) + geom_histogram(binwidth = 1,fill="white",position="identity") + labs(color="Secured Loans");evr_hist
+
+#Consumer Price Index
+cpi <- ggplot(bank, aes(x=bank$y,y=cons.price.idx,color=bank$y)) + geom_boxplot(outlier.colour = "black") + labs(color="Secured Loans");cpi
+cpi_hist <- ggplot(bank, aes(x=cons.price.idx,color=bank$y)) + geom_histogram(binwidth = 0.3,fill="white",position="identity") + labs(color="Secured Loans");cpi_hist
+
+#Consumer Confidence Index
+cci <- ggplot(bank, aes(x=bank$y,y=cons.conf.idx,color=bank$y)) + geom_boxplot(outlier.colour = "black") + labs(color="Secured Loans");cci
+cci_hist <- ggplot(bank, aes(x=cons.conf.idx,color=bank$y)) + geom_histogram(binwidth = 3,fill="white",position="identity") + labs(color="Secured Loans");cci_hist
+
+#Euribor 3m
+eur <- ggplot(bank, aes(x=bank$y,y=euribor3m,color=bank$y)) + geom_boxplot(outlier.colour = "black") + labs(color="Secured Loans") + xlab("Secured Loan");eur
+eur_hist <- ggplot(bank, aes(x=euribor3m,color=bank$y)) + geom_histogram(binwidth = 1,fill="white",position="identity") + labs(color="Secured Loans");eur_hist
+
+
+```
+
+
+## 3) Correlation Between Variables
+
+### 3.1) Social Variables
+
+Regression & PCA & Stepwise & Anova (numerical)
+Correlation b/w variables (vif)
+
+```{r EDA}
+social_vars = bank[, c(16:20,22)]
+print(cor(social_vars))
+# pairs(social_vars)
+
+social_vars %>% 
+  select(-yn) %>% 
+  cor() %>% 
+  corrplot(method = "number",
+           type = "upper",
+           tl.cex = 0.8,
+           tl.srt = 45,
+           tl.col = "black")
+
+# Remove any variables with p-values of the anova test > 0.01
+pv = rep(c(1,dim(social_vars)[2]-1))
+
+for (i in 1:length(social_vars)-1) {
+  pv[i] <- anovaScores(social_vars[,i], social_vars$yn)
+}
+
+rmv <- NULL
+for (i in c(1:length(pv))) {
+  if (pv[i] > 0.01) {
+    rmv <- c(rmv,i)
+  }
+}
+print(rmv)
+# all variables can be kept
+
+# let's see if there are any variables that have mutlicolinearity or if we can reduce dimensions
+social_lm = lm(yn~., social_vars)
+summary(social_lm)
+print(vif(social_lm))
+# can remove those > 10 in vif --> nr.employed, euribor3m, emp.var.rate
+
+# PCA
+social_lm_mm = model.matrix(social_lm)
+Y = social_lm_mm[,-1]
+pca = prcomp(Y, center = TRUE, scale=TRUE)
+summary(pca)
+plot(pca,type="l")
+# concat the pca$x df with the predictors and run lm
+# https://www.analyticsvidhya.com/blog/2016/03/pca-practical-guide-principal-component-analysis-python/
+
+# stepwise to find a regression that chooses a subset of variables that give the best performing model
+stepwise(social_lm)
+
+# New regression with subset of variables provided by stepwise
+social_lm_red = lm(formula = yn ~ emp.var.rate + cons.price.idx + cons.conf.idx + nr.employed, data = social_vars)
+summary(social_lm_red)
+
+# anova to compare models
+anova(social_lm, social_lm_red)
+
+# Ho: g and g_red are significantly the same (g_red is better)
+# Ha: r and g_red are significantly different
+# Read P-value of both models (should be < alpha) = if p-value < 0.05 then we reject the Null (Ho)
+# check SSE (should decrease)
+# R^2 (should increase)
+# change in coefficients (should not change much)
+
+bank = bank %>% select(-c(euribor3m))
+
+
+```
+Employe Variability Rate, Consumer Price Index, Consumer Confidence Index, and Number of Employees are significant from the regression analysis.
+However, vif shows that euribor, number employed and employe variability rate are highly correlated, and stepwise shows us which variables give the best performing model. Anova p-value fails to reject the null, meaning reduced model is better. Reduced model excludes euribor, which has the highest VIF value and does not explain too much variability in PCA.
+
+
+### 3.2) Demographic and Campaign History Variables
+
+```{r}
+
+# Take out variables that showed no statistical significance in the relationship with the dependant variable
+# Default, Housing, Loan, Duration,
+bank = bank %>% select(-c(default, housing, loan, duration))
+
+dem_vars = bank[, -c(12:15,17)]
+c = data.frame(matrix(ncol=3, nrow=0))
+colnames(c) = c("variable","cramerV","chqsq.p-val")
+
+for (i in 1:(length(dem_vars)-1)) {
+  a = colnames(dem_vars)[i]
+  b = cramerV(dem_vars[,i], dem_vars$y)
+  chq = chisq.test(dem_vars[,i],dem_vars$y) 
+  c[i,1] = a
+  c[i,2] = b
+  c[i,3] = chq$p.value
+}
+
+c
+
+#http://www.acastat.com/statbook/chisqassoc.htm
+
+```
+
+Even though a chi-square test may show statistical significance between two variables, the relationship between those variables may not be substantively important. These and many other measures of association are available to help evaluate the relative strength of a statistically significant relationship.  In most cases, they are not used in interpreting the data unless the chi-square statistic first shows there is statistical significance (i.e., it doesn't make sense to say there is a strong relationship between two variables when your statistical test shows this relationship is not statistically significant).
+
+
+# B) Split into Training & Test
+
+```{r}
+# Exclude Outliers
+# dim(bank[bank$campaign > 6,])
+# dim(bank[bank$age > 69,])
+# dim(bank[bank$previous > 0,])
+
+# Get Dummy Variable Data Matrix for Models that only take in numerical predictors
+cat_vars = bank %>% select_if(is.factor)
+cat_vars_dmy = dummy.data.frame(cat_vars[,-8],
+                                c("job","marital","education","contact","month","day_of_week","poutcome"))
+num_vars = bank %>% select(-c(job,marital,education,contact,month,day_of_week,poutcome,y))
+bank_dmy = cbind(cat_vars_dmy,num_vars)
+
+# Split into Train and Test
+set.seed(123)
+intrain = createDataPartition(y=bank$yn,p=0.75,list=FALSE)
+
+# Original DF
+assign("train_bank_og", bank[intrain,-16])
+assign("test_bank_og", bank[-intrain,-16])
+
+# Categorical DF
+assign("train_bank_dmy", bank_dmy[intrain,])
+assign("test_bank_dmy", bank_dmy[-intrain,])
+
+# Get y predictor from test and train data
+train_y = train_bank_og$yn
+test_y = test_bank_og$yn
+
+# Get levels for dummy matrix response variable
+train_bank_dmy$class = as.factor(train_bank_dmy$yn)
+levels(train_bank_dmy$class) = c("X0","X1")
+levels(train_bank_dmy$class)
+
+test_bank_dmy$class = as.factor(test_bank_dmy$yn)
+levels(test_bank_dmy$class) = c("X0","X1")
+levels(test_bank_dmy$class)
+
+```
+
+# C) Models
+
+## 1) Decision Tree
+### 1.1) Regular
+```{r}
+dt_og = C5.0(as.factor(yn)~., train_bank_og)
+
+# display simple facts about the tree
+dt_og
+
+# display detailed information about the tree
+summary(dt_og)
+
+# Evaluate model performance
+# create a factor vector of predictions on test data
+dt_og_pred = predict(dt_og, test_bank_og[,-16])
+
+CrossTable(as.factor(test_bank_og$yn), dt_og_pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE)
+
+confusionMatrix(dt_og_pred, as.factor(test_bank_og$yn), positive = "1")
+
+# get all cat variables into dummy df for PCA, regression, stepwise, decision tree
+# compare results to decision tree with categorical values
+```
+
+### 1.2) Boosting + Error Cost
+```{r}
+## Making some mistakes more costly than others
+
+# create dimensions for a cost matrix
+matrix_dimensions <- list(c("no", "yes"), c("no", "yes"))
+names(matrix_dimensions) <- c("predicted", "actual")
+matrix_dimensions
+
+# build the matrix
+error_cost <- matrix(c(0, 1, 0, 1), nrow = 2, dimnames = matrix_dimensions)
+error_cost
+
+dt_10_og = C5.0(as.factor(train_bank_og$yn)~., train_bank_og, trials=10, costs=error_cost)
+
+dt_10_og
+summary(dt_10_og)
+
+dt_10_og_pred = predict(dt_10_og, test_bank_og[,-16])
+
+CrossTable(as.factor(test_bank_og$yn), dt_10_og_pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE)
+
+confusionMatrix(dt_10_og_pred, as.factor(test_bank_og$yn), positive = "1")
+
+# get all cat variables into dummy df for PCA, regression, stepwise, decision tree
+# compare results to decision tree with categorical values
+```
+
+
+## 2) Regression Analysis (Lasso, Ridge, Elastic Net)
+Takes in Cat and Numerical
+
+### 2.1)Logistic Regression
+```{r}
+log_reg = glm(train_bank_og$yn~., family = "binomial", data=train_bank_og[,-16])
+summary(log_reg)
+
+log_reg_pred = predict(log_reg, test_bank_og[,-16], type="response")
+
+log_reg_pred[log_reg_pred >= 0.5] = 1
+log_reg_pred[log_reg_pred < 0.5] = 0
+
+CrossTable(test_bank_og$yn, log_reg_pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE)
+
+confusionMatrix(as.factor(log_reg_pred),as.factor(test_bank_og$yn), positive = "1")
+
+```
+
+d.	Perform Ridge logistic regression using predictors from (c).
+e.	Perform LASSO logistic regression using the predictors from (c).
+f.	Perform elastic-net logistic regression using a small value of alpha using predictors from (c).
+g.	Perform elastic-net logistic regression using a value alpha close to 1 using predictors from (c).
+
+```{r}
+# Ridge - shrinks regression coefficients towards 0 for variables that have minor contribution to outcome
+ridge.fit <- cv.glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=0, family="binomial", type.measure = "class", nfolds = 3)
+
+# Lasso - sets regression coefficients as 0 for variables that have minor contribution to outcome
+lasso.fit <- cv.glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=1, family="binomial", type.measure = "class", nfolds = 3)
+
+# Elastic Net - uses both ridge and lasso
+elastic.fit <- cv.glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=0.3, family="binomial", type.measure = "class", nfolds = 3)
+
+```
+
+
+```{r}
+# Ridge Regression
+# Display the best lambda value
+ridge.fit$lambda.min
+ridge.fit$lambda.1se
+
+# Fit the final model on the training data
+ridge.model = glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=0, lambda = ridge.fit$lambda.min, family="binomial")
+
+# View Coefficients
+coef(ridge.model)
+
+# Make predictions
+predictions = ridge.model %>% predict(as.matrix(scale(test_bank_dmy[,-c(53,54)])),type="class") %>% as.vector() %>% as.factor()
+confusionMatrix(as.factor(predictions),as.factor(test_bank_dmy$yn), positive = "1")
+
+## For numeric
+data.frame(
+  RMSE = RMSE(as.numeric(predictions), test_bank_dmy$yn),
+  Rsq = R2(as.numeric(predictions), test_bank_dmy$yn)
+)
+
+
+# Lasso Regression
+# Display the best lambda value
+lasso.fit$lambda.min
+lasso.fit$lambda.1se
+
+# Fit the final model on the training data
+lasso.model = glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=0, lambda = lasso.fit$lambda.min, family="binomial")
+
+# View Coefficients
+coef(lasso.model)
+
+# Make predictions
+# pred <- predict(cv.ridge.fit, newx = as.matrix(scale(pred_vars)), type="class", s=cv.ridge.fit$lambda.min)
+predictions = lasso.model %>% predict(as.matrix(scale(test_bank_dmy[,-c(53,54)])),type="class") %>% as.vector() %>% as.factor()
+confusionMatrix(as.factor(predictions),as.factor(test_bank_dmy$yn), positive = "1")
+
+## For numeric
+data.frame(
+  RMSE = RMSE(as.numeric(predictions), test_bank_dmy$yn),
+  Rsq = R2(as.numeric(predictions), test_bank_dmy$yn)
+)
+
+
+# Lasso Regression
+# Display the best lambda value
+elastic.fit$lambda.min
+elastic.fit$lambda.1se
+
+# Fit the final model on the training data
+elastic.model = glmnet(as.matrix(scale(train_bank_dmy[,-c(53,54)])), train_bank_dmy$yn, alpha=0, lambda = elastic.fit$lambda.min, family="binomial")
+
+# View Coefficients
+coef(elastic.model)
+
+# Make predictions
+predictions = lasso.model %>% predict(as.matrix(scale(test_bank_dmy[,-c(53,54)])),type="class") %>% as.vector() %>% as.factor()
+confusionMatrix(as.factor(predictions),as.factor(test_bank_dmy$yn), positive = "1")
+
+## For numeric
+data.frame(
+  RMSE = RMSE(as.numeric(predictions), test_bank_dmy$yn),
+  Rsq = R2(as.numeric(predictions), test_bank_dmy$yn)
+)
+
+```
+
+
+## 3) SVM
+
+Takes only Numerical - Will need Dummy Matrices
+```{r}
+
+do.svm.radial <- function(training){
+  set.seed(1)
+  tmpTraining <- training
+  tmpTraining$class <- NULL
+  sig <- sigest(as.matrix(tmpTraining))
+  grd.r <- expand.grid(sigma=sig, C=2^seq(from=-1, by=1, to=3))
+  ctrl.r <- trainControl(method = "cv", number = 2, savePredictions = TRUE, classProbs = TRUE, allowParallel = TRUE)
+  svm.r.fit <- train(class~., data=training, preProcess=c("center","scale"), method="svmRadial", metric="Accuracy", family="binomial", tuneGrid=grd.r, trControl=ctrl.r)
+  svm.r.fit
+}
+
+do.svm.poly <- function(training){
+  set.seed(1)
+  grd.p <- expand.grid(scale=1, degree=c(1,2), C=2^seq(from=-1, by=1, to=3))
+  ctrl.p <- trainControl(method="cv", number=2, savePredictions = TRUE, classProbs = TRUE, allowParallel = TRUE)
+  svm.p.fit <- train(class~., data=training, preProcess=c("center","scale"), method="svmPoly", metric="Accuracy", family="binomial", tuneGrid=grd.p, trControl=ctrl.p)
+  svm.p.fit
+}
+
+do.svm.linear <- function(training){
+  set.seed(1)
+  grd.l <- expand.grid(C=2^seq(from=-1, by=1, to=3))
+  ctrl.l <- trainControl(method = "cv", number = 2, savePredictions = TRUE, classProbs = TRUE, allowParallel = TRUE)
+  svm.l.fit <- train(class~., data=training, preProcess=c("center","scale"), method="svmLinear", metric="Accuracy", tuneGrid=grd.l, trControl=ctrl.l)
+}
+```
+
+### 3.1) Radial
+```{r}
+fit.svm.r <- do.svm.radial(train_bank_dmy[,-53])
+print(fit.svm.r)
+plot(fit.svm.r)
+```
+
+```{r}
+pred.svmr <- predict(fit.svm.r, test_bank_dmy[,-c(53,54)])
+confusionMatrix(pred.svmr, test_bank_dmy$class)
+```
+
+
+### 3.2) Poly
+```{r}
+fit.svm.p <- do.svm.poly(train_bank_dmy[,-53])
+print(fit.svm.p)
+plot(fit.svm.p)
+```
+
+```{r}
+pred.svmp <- predict(fit.svm.p, test_bank_dmy[,-c(53,54)])
+confusionMatrix(pred.svmp, test_bank_dmy$class)
+```
+
+
+### 3.3) Linear
+```{r}
+fit.svm.l <- do.svm.linear(train_bank_dmy[,-53])
+print(fit.svm.l)
+plot(fit.svm.l)
+```
+
+```{r}
+pred.svml <- predict(fit.svm.l, test_bank_dmy[,-c(53,54)])
+confusionMatrix(pred.svml, test_bank_dmy$class)
+```
+
+
+
+## 3) Random Forest
+Takes in Cat and Numerical
+```{r}
+do.rf <- function(training){
+  set.seed(1)
+  n  <- dim(training)[2]
+  grd.rf <- expand.grid(mtry = seq(from=0, by=as.integer(n/10), to=n)[-1])
+  ctrl.rf <- trainControl(method = "cv", number = 5, savePredictions = TRUE, classProbs = TRUE, allowParallel = TRUE)
+  rf.Fit <- train(class~., data=training, ntree=200, method="rf", metric="Kappa", preProcess=c("center","scale"), tuneGrid = grd.rf, trControl=ctrl.rf)
+  rf.Fit
+}
+
+```
+
+```{r}
+fit.rf <- do.rf(train_bank_dmy[,-53])
+pred.rf <- predict(fit.rf, test_bank_dmy[,-c(53,54)])
+confusionMatrix(pred.rf, test_bank_dmy$class, positive = "X1")
+```
+
+```{r}
+# lapply(split(bank$yn,bank$education),summary) #apply summary to all factors
+# tapply(bank$y,bank$education,length) #e.g. mean, sd
+# boxplot(bank$yn~bank$education)
+# lm(y~education-1, bank) #remove intercept to see dummy variables
+# round(prop.table(table(bank$y,bank$education),1),3)*100 #1 for row, 2 for column
+```
